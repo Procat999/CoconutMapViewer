@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Coconut World Viewer (25k x 25k)</title>
+    <!-- Favicon link pointing to your local favicon.png -->
+    <link rel="icon" type="image/png" href="favicon.png">
+    
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            /* Tiled Orange-to-Gray background check pattern */
+            background: 
+                linear-gradient(to bottom left, rgba(255, 130, 0, 0.45), rgba(20, 20, 20, 0.95)),
+                repeating-conic-gradient(#1e1e1e 0% 25%, #2a2a2a 25% 50%) 0 0 / 64px 64px;
+            background-color: #121212;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; /* Prevents mobile browser pinch-to-zoom on the document itself */
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            outline: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+        }
+
+        /* Minecraft F3 Debug Screen Overlay Style */
+        #f3-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            font-weight: bold;
+            line-height: 1.4;
+            text-shadow: 2px 2px 0px #000;
+            pointer-events: none; /* Let clicks pass through */
+            z-index: 100;
+            display: block; /* Shown by default */
+            background: rgba(0, 0, 0, 0.4);
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        /* Minecraft F3 Right side (System/Controls info) */
+        #f3-right-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            text-align: right;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            font-weight: bold;
+            line-height: 1.4;
+            text-shadow: 2px 2px 0px #000;
+            pointer-events: none;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        /* Touch Control Button Layer */
+        #mobile-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            z-index: 200;
+        }
+
+        /* Sleek Minecraft style interactive button */
+        .mc-btn {
+            background-color: #4a4a4a;
+            border: 2px solid #000;
+            border-top-color: #8b8b8b;
+            border-left-color: #8b8b8b;
+            color: #fff;
+            padding: 10px 16px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            text-shadow: 1px 1px 0px #000;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border-radius: 4px;
+            touch-action: manipulation;
+        }
+
+        .mc-btn:active {
+            background-color: #2e2e2e;
+            border: 2px solid #000;
+            border-bottom-color: #8b8b8b;
+            border-right-color: #8b8b8b;
+            padding-top: 11px;
+            padding-bottom: 9px;
+        }
+
+        #toast {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            border: 1px solid #ffaa00;
+            color: #ffaa00;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 8px 16px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 300;
+            text-shadow: 1px 1px 0px #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <!-- F3 Left Side Panel -->
+        <div id="f3-panel">
+            Minecraft 1.20.4 (Viewer Edition)<br>
+            Active Resolution: 25000 x 25000 blocks<br>
+            <br>
+            XYZ: <span id="f3-xyz">0.000 / 64.000 / 0.000</span><br>
+            Block: <span id="f3-block">0 64 0</span><br>
+            Chunk: <span id="f3-chunk">0 4 0 inside 0 4 0</span><br>
+            Facing: <span id="f3-facing">south (Towards positive Z)</span><br>
+            Zoom: <span id="f3-zoom">100%</span>
+        </div>
+
+        <!-- F3 Right Side Panel -->
+        <div id="f3-right-panel">
+            Display: Map Viewer Engine<br>
+            Grid Coordinates: 25k centered (0,0)<br>
+            Img Res: <span id="f3-img-res">Detecting...</span><br>
+            Markers: <span id="f3-markers">0 active</span><br>
+            <span style="color:#aaa;">F3 Key: Toggle Debug</span>
+        </div>
+
+        <canvas id="map-canvas"></canvas>
+
+        <!-- Touch Controls UI -->
+        <div id="mobile-controls">
+            <button class="mc-btn" id="btn-f3">Toggle F3</button>
+            <button class="mc-btn" id="btn-reset">Reset View</button>
+            <button class="mc-btn" id="btn-clear">Clear Markers</button>
+        </div>
+
+        <div id="toast">Marker added!</div>
+    </div>
+
+    <script>
+        // --- MAP CONFIGURATION ---
+        const MAP_CONFIG = {
+            // How many Minecraft blocks does 1 pixel represent?
+            // (If Unmined exported a 25k x 25k world as a 25k x 25k pixel image, blocksPerPixel is 1)
+            blocksPerPixel: 1,
+
+            // The Top-Left boundaries based on a perfectly centered 25k x 25k world.
+            // 25,000 blocks wide divided by 2 = 12,500
+            topLeftX: -12500,
+            topLeftZ: -12500
+        };
+
+        // Wrap execution in DOMContentLoaded to prevent 'null getContext' error
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('map-canvas');
+            if (!canvas) {
+                console.error("Canvas element not found!");
+                return;
+            }
+            const ctx = canvas.getContext('2d');
+
+            // --- STATE MANAGEMENT ---
+            let scale = 1.0;
+            let offsetX = 0;
+            let offsetY = 0;
+            let isPanning = false;
+            let startX = 0;
+            let startY = 0;
+
+            // Coordinates trackers
+            let mcCoords = { x: 0, z: 0 };
+
+            // Markers list: objects with relative image {x, y, label}
+            let markers = [];
+
+            // Image handling
+            let imgLoaded = false;
+            let imgError = false;
+            const mapImg = new Image();
+            mapImg.src = 'mapview.png';
+
+            mapImg.onload = () => {
+                imgLoaded = true;
+                document.getElementById('f3-img-res').innerText = `${mapImg.width}x${mapImg.height}px`;
+                resetView();
+            };
+
+            mapImg.onerror = () => {
+                imgError = true;
+                document.getElementById('f3-img-res').innerText = `Error loading!`;
+                draw(); // Force a draw to display the error state instructions
+            };
+
+            // Setup elements
+            const f3Xyz = document.getElementById('f3-xyz');
+            const f3Block = document.getElementById('f3-block');
+            const f3Chunk = document.getElementById('f3-chunk');
+            const f3Facing = document.getElementById('f3-facing');
+            const f3Zoom = document.getElementById('f3-zoom');
+            const f3MarkersCount = document.getElementById('f3-markers');
+            const f3Left = document.getElementById('f3-panel');
+            const f3Right = document.getElementById('f3-right-panel');
+            const toast = document.getElementById('toast');
+
+            // --- STREAMING_CHUNK:Defining responsive resizing... ---
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                if (!imgLoaded && !imgError) {
+                    offsetX = canvas.width / 2;
+                    offsetY = canvas.height / 2;
+                }
+                draw();
+            }
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            function resetView() {
+                if (imgLoaded) {
+                    // Fit the entire image into the browser screen initially
+                    const widthScale = canvas.width / mapImg.width;
+                    const heightScale = canvas.height / mapImg.height;
+                    scale = Math.min(widthScale, heightScale, 1.0);
+                    
+                    // Center the map viewport
+                    offsetX = (canvas.width - mapImg.width * scale) / 2;
+                    offsetY = (canvas.height - mapImg.height * scale) / 2;
+                } else {
+                    scale = 1.0;
+                    offsetX = canvas.width / 2;
+                    offsetY = canvas.height / 2;
+                }
+                draw();
+            }
+
+            // --- STREAMING_CHUNK:Implementing Canvas Drawing Loop... ---
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                ctx.save();
+                ctx.translate(offsetX, offsetY);
+                ctx.scale(scale, scale);
+
+                if (imgLoaded) {
+                    // Draw mapview.png
+                    ctx.drawImage(mapImg, 0, 0);
+
+                    // Draw all user markers
+                    markers.forEach((marker, index) => {
+                        ctx.save();
+                        ctx.translate(marker.x, marker.y);
+                        
+                        // Keep markers looking crisp even when zoomed way out
+                        const markerScale = Math.max(0.4, Math.min(2.0, 1.2 / scale));
+                        ctx.scale(markerScale, markerScale);
+
+                        // Map marker drop shadow
+                        ctx.beginPath();
+                        ctx.arc(0, 0, 10, 0, 2 * Math.PI);
+                        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                        ctx.fill();
+
+                        // Map marker outer outline
+                        ctx.beginPath();
+                        ctx.arc(0, 0, 8, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fill();
+
+                        // Marker Inner Red Core
+                        ctx.beginPath();
+                        ctx.arc(0, 0, 6, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#ff2200';
+                        ctx.fill();
+
+                        // Marker Core Accent
+                        ctx.beginPath();
+                        ctx.arc(-2, -2, 2, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fill();
+
+                        ctx.restore();
+                    });
+                } else if (imgError) {
+                    // Display fallback image diagnostic message
+                    ctx.restore();
+                    ctx.fillStyle = "#ffaa00";
+                    ctx.font = "20px 'Courier New', monospace";
+                    ctx.textAlign = "center";
+                    ctx.shadowColor = "black";
+                    ctx.shadowBlur = 4;
+                    ctx.fillText("⚠️ Image Load Error: 'mapview.png' not found", canvas.width / 2, canvas.height / 2 - 20);
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "14px 'Courier New', monospace";
+                    ctx.fillText("Ensure 'mapview.png' is in the same folder as this HTML file.", canvas.width / 2, canvas.height / 2 + 10);
+                    ctx.fillText("Then, refresh this page to begin exploring.", canvas.width / 2, canvas.height / 2 + 35);
+                    return;
+                } else {
+                    // Loading state
+                    ctx.restore();
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "20px 'Courier New', monospace";
+                    ctx.textAlign = "center";
+                    ctx.fillText("Loading World View...", canvas.width / 2, canvas.height / 2);
+                    return;
+                }
+
+                ctx.restore();
+
+                // Keep F3 panels matched with live data
+                updateF3Text();
+            }
+
+            // --- STREAMING_CHUNK:Math and coordinate updates... ---
+            function updateCoordinates(screenX, screenY) {
+                // Work backwards through the zoom-pan transform matrices
+                const imageX = (screenX - offsetX) / scale;
+                const imageZ = (screenY - offsetY) / scale;
+
+                // Absolute conversion logic using MAP_CONFIG definitions
+                mcCoords.x = Math.round(MAP_CONFIG.topLeftX + (imageX * MAP_CONFIG.blocksPerPixel));
+                mcCoords.z = Math.round(MAP_CONFIG.topLeftZ + (imageZ * MAP_CONFIG.blocksPerPixel));
+
+                updateF3Text();
+            }
+
+            function updateF3Text() {
+                f3Xyz.innerText = `${mcCoords.x}.000 / 64.000 / ${mcCoords.z}.000`;
+                f3Block.innerText = `${mcCoords.x} 64 ${mcCoords.z}`;
+                
+                // MC Chunk Calculations
+                const chunkX = Math.floor(mcCoords.x / 16);
+                const chunkZ = Math.floor(mcCoords.z / 16);
+                const blockInChunkX = (mcCoords.x % 16 + 16) % 16;
+                const blockInChunkZ = (mcCoords.z % 16 + 16) % 16;
+                f3Chunk.innerText = `${blockInChunkX} 4 ${blockInChunkZ} inside ${chunkX} 4 ${chunkZ}`;
+
+                // Calculate Minecraft compass directions
+                let dir = "south (Towards positive Z)";
+                if (Math.abs(mcCoords.x) > Math.abs(mcCoords.z)) {
+                    dir = mcCoords.x > 0 ? "east (Towards positive X)" : "west (Towards negative X)";
+                } else {
+                    dir = mcCoords.z > 0 ? "south (Towards positive Z)" : "north (Towards negative Z)";
+                }
+                f3Facing.innerText = dir;
+
+                f3Zoom.innerText = `${Math.round(scale * 100)}%`;
+                f3MarkersCount.innerText = `${markers.length} active`;
+            }
+
+            // --- STREAMING_CHUNK:Handling touch and mouse pan/zoom gestures... ---
+            // Mouse Interaction Drag & Move
+            canvas.addEventListener('mousedown', (e) => {
+                if (e.button === 0) { // Left Mouse Button Only
+                    isPanning = true;
+                    startX = e.clientX - offsetX;
+                    startY = e.clientY - offsetY;
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                updateCoordinates(mouseX, mouseY);
+
+                if (isPanning) {
+                    offsetX = e.clientX - startX;
+                    offsetY = e.clientY - startY;
+                    draw();
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                isPanning = false;
+            });
+
+            // Smooth Scroll Zoom mapped to center cursor position
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomIntensity = 0.12;
+                const zoomFactor = e.deltaY < 0 ? Math.exp(zoomIntensity) : Math.exp(-zoomIntensity);
+
+                if (scale * zoomFactor > 40.0 || scale * zoomFactor < 0.02) return;
+
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                offsetX = mouseX - (mouseX - offsetX) * zoomFactor;
+                offsetY = mouseY - (mouseY - offsetY) * zoomFactor;
+                scale *= zoomFactor;
+
+                draw();
+            }, { passive: false });
+
+            // Right-click to add a map marker
+            canvas.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                addMarkerAtScreenPos(mouseX, mouseY);
+            });
+
+            // Tap or Left-click an existing marker to clear it
+            canvas.addEventListener('click', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                // Map client coords to canvas coordinates to scan marker radii
+                const clickImgX = (mouseX - offsetX) / scale;
+                const clickImgY = (mouseY - offsetY) / scale;
+
+                let hitIndex = -1;
+                // Click radius detection adjusts dynamically depending on screen zoom level
+                const hitRadius = Math.max(12, 16 / scale);
+
+                for (let i = markers.length - 1; i >= 0; i--) {
+                    const dist = Math.hypot(markers[i].x - clickImgX, markers[i].y - clickImgY);
+                    if (dist < hitRadius) {
+                        hitIndex = i;
+                        break;
+                    }
+                }
+
+                if (hitIndex !== -1) {
+                    markers.splice(hitIndex, 1);
+                    showToast("Marker removed");
+                    draw();
+                }
+            });
+
+            // --- STREAMING_CHUNK:Building mobile touch zoom and pan gestures... ---
+            let touchStartDist = 0;
+            let touchStartScale = 1.0;
+            let isPinching = false;
+            let lastTouchX = 0;
+            let lastTouchY = 0;
+            let touchTimer = null; // Used for long-press marker triggers
+
+            canvas.addEventListener('touchstart', (e) => {
+                // Single-touch panning
+                if (e.touches.length === 1) {
+                    isPanning = true;
+                    lastTouchX = e.touches[0].clientX;
+                    lastTouchY = e.touches[0].clientY;
+
+                    // Touch tracker coordinates update
+                    const rect = canvas.getBoundingClientRect();
+                    updateCoordinates(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+
+                    // Setup Long-press detection (500ms) for creating a marker
+                    clearTimeout(touchTimer);
+                    touchTimer = setTimeout(() => {
+                        const tx = e.touches[0].clientX - rect.left;
+                        const ty = e.touches[0].clientY - rect.top;
+                        addMarkerAtScreenPos(tx, ty);
+                    }, 600);
+                } 
+                // Double-finger gesture zooming
+                else if (e.touches.length === 2) {
+                    isPanning = false;
+                    isPinching = true;
+                    clearTimeout(touchTimer); // Stop long-press detection on multi-touch
+
+                    touchStartDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    touchStartScale = scale;
+                }
+            });
+
+            canvas.addEventListener('touchmove', (e) => {
+                // Cancel holding to add marker if fingers are actively sliding
+                clearTimeout(touchTimer);
+
+                const rect = canvas.getBoundingClientRect();
+
+                if (isPanning && e.touches.length === 1) {
+                    const deltaX = e.touches[0].clientX - lastTouchX;
+                    const deltaY = e.touches[0].clientY - lastTouchY;
+
+                    offsetX += deltaX;
+                    offsetY += deltaY;
+
+                    lastTouchX = e.touches[0].clientX;
+                    lastTouchY = e.touches[0].clientY;
+
+                    updateCoordinates(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+                    draw();
+                } 
+                else if (isPinching && e.touches.length === 2) {
+                    const currentDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    
+                    const zoomFactor = currentDist / touchStartDist;
+                    let targetScale = touchStartScale * zoomFactor;
+
+                    // Constraints bounds checking
+                    if (targetScale > 40.0) targetScale = 40.0;
+                    if (targetScale < 0.02) targetScale = 0.02;
+
+                    // Pinch center point reference calculation
+                    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+                    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+
+                    const scaleRatio = targetScale / scale;
+                    offsetX = midX - (midX - offsetX) * scaleRatio;
+                    offsetY = midY - (midY - offsetY) * scaleRatio;
+                    scale = targetScale;
+
+                    draw();
+                }
+            });
+
+            canvas.addEventListener('touchend', (e) => {
+                clearTimeout(touchTimer);
+                isPanning = false;
+                isPinching = false;
+            });
+
+            // Helper function to dynamically add map pins
+            function addMarkerAtScreenPos(screenX, screenY) {
+                if (!imgLoaded) return;
+                
+                const imgX = (screenX - offsetX) / scale;
+                const imgY = (screenY - offsetY) / scale;
+
+                // Confirm bounds are inside active world coordinates
+                if (imgX >= 0 && imgX <= mapImg.width && imgY >= 0 && imgY <= mapImg.height) {
+                    markers.push({ x: imgX, y: imgY });
+                    showToast("Marker added at coordinates!");
+                    draw();
+                }
+            }
+
+            function showToast(msg) {
+                toast.innerText = msg;
+                toast.style.opacity = 1;
+                setTimeout(() => toast.style.opacity = 0, 1500);
+            }
+
+            // Keyboard shortcut Listener: Classic F3 Toggle
+            window.addEventListener('keydown', (e) => {
+                if (e.key === "F3") {
+                    e.preventDefault();
+                    toggleF3UI();
+                }
+            });
+
+            function toggleF3UI() {
+                if (f3Left.style.display === "none") {
+                    f3Left.style.display = "block";
+                    f3Right.style.display = "block";
+                } else {
+                    f3Left.style.display = "none";
+                    f3Right.style.display = "none";
+                }
+            }
+
+            // Button Control Actions
+            document.getElementById('btn-f3').addEventListener('click', toggleF3UI);
+            document.getElementById('btn-reset').addEventListener('click', resetView);
+            document.getElementById('btn-clear').addEventListener('click', () => {
+                if (markers.length > 0) {
+                    markers = [];
+                    showToast("All markers cleared");
+                    draw();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
